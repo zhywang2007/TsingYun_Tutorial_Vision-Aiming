@@ -16,45 +16,72 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
+from train import MNISTClassifier
+
 RgbPixel = tuple[int, int, int]
 ImageLike = np.ndarray
 
 DEFAULT_MODEL_PATH = Path(__file__).resolve().parents[1] / "models" / "mnist_classifier.npz"
 
+_cached_model: object | None = None
+_cached_model_path: Path | None = None
+
 
 def preprocess_mnist_crop(board_crop: ImageLike) -> np.ndarray:
-    # TODO(student): Convert a detected board crop into classifier input.
-    # convert board_crop to a single-channel image using cv2
-    # resize the grayscale crop to 28x28, for example with cv2.resize(...)
-    # normalize values to [0, 1]
-    # convert the result to the tensor/array shape expected by your classifier
-    # return normalized input array
-    raise NotImplementedError("preprocess_mnist_crop is not implemented")
+    board = np.asarray(board_crop, dtype=np.uint8)
+    if board.ndim == 3 and board.shape[2] == 3:
+        gray = cv2.cvtColor(board, cv2.COLOR_BGR2GRAY)
+    elif board.ndim == 2:
+        gray = board.astype(np.uint8)
+    else:
+        raise ValueError("preprocess_mnist_crop expects a 2D or 3-channel image")
+
+    resized = cv2.resize(gray, (28, 28), interpolation=cv2.INTER_AREA)
+    normalized = resized.astype(np.float32) / 255.0
+    normalized = normalized.reshape((1, 28, 28))
+    return normalized
 
 
 def load_mnist_model(model_path: Path = DEFAULT_MODEL_PATH) -> object:
-    # TODO(student): Load your trained MNIST classifier from disk.
-    # Input: model_path.
-    # Output: a trained classifier model ready for inference.
-    # If you use PyTorch, instantiate the model, load the weights, and switch to eval mode.
-    raise NotImplementedError("load_mnist_model is not implemented")
+    global _cached_model, _cached_model_path
+    model_path = Path(model_path)
+    if _cached_model is not None and _cached_model_path == model_path:
+        return _cached_model
+
+    model = MNISTClassifier()
+    if model_path.exists():
+        state_dict = torch.load(model_path, map_location="cpu")
+        if isinstance(state_dict, dict):
+            model.load_state_dict(state_dict)
+        else:
+            raise ValueError(f"Expected model state dict, got {type(state_dict)}")
+    model.eval()
+
+    _cached_model = model
+    _cached_model_path = model_path
+    return model
 
 
 def predict_mnist_digit(model: object, model_input: np.ndarray) -> tuple[int, float]:
-    # TODO(student): Run classifier inference and convert scores to digit/confidence.
-    # convert model_input to a torch tensor if needed
-    # run inference under torch.no_grad()
-    # apply F.softmax(...) if the model returns logits
-    # digit = argmax(probabilities)
-    # confidence = probabilities[digit]
-    # return digit, confidence
-    raise NotImplementedError("predict_mnist_digit is not implemented")
+    tensor = torch.from_numpy(model_input.astype(np.float32))
+    if tensor.ndim == 3:
+        tensor = tensor.unsqueeze(0)
+    elif tensor.ndim == 2:
+        tensor = tensor.unsqueeze(0).unsqueeze(0)
+    elif tensor.ndim == 4:
+        pass
+    else:
+        raise ValueError("predict_mnist_digit expects input with 2, 3, or 4 dimensions")
+
+    with torch.no_grad():
+        logits = model(tensor)
+        probabilities = F.softmax(logits, dim=1)
+        confidence, predicted = torch.max(probabilities, dim=1)
+
+    return int(predicted.item()), float(confidence.item())
 
 
 def classify_mnist_digit(board_crop: ImageLike, model_path: Path = DEFAULT_MODEL_PATH) -> tuple[int, float]:
-    # TODO(student): Classify the MNIST digit shown on one detected board crop.
-    # model_input = preprocess_mnist_crop(board_crop)
-    # model = load_mnist_model(model_path)
-    # digit, confidence = predict_mnist_digit(model, model_input)
-    # return digit, confidence
-    raise NotImplementedError("classify_mnist_digit is not implemented")
+    model = load_mnist_model(model_path)
+    model_input = preprocess_mnist_crop(board_crop)
+    return predict_mnist_digit(model, model_input)

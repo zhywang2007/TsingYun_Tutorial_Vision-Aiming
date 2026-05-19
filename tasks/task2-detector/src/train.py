@@ -27,41 +27,70 @@ class MNISTClassifier(nn.Module):
 
     def __init__(self, input_size: int = 28 * 28, num_classes: int = 10) -> None:
         super().__init__()
-        # TODO(student): fill in your custom model architectures
-        raise NotImplementedError("MNIST classifier model logic not implemented!")
+        self.network = nn.Sequential(
+            nn.Flatten(),
+            nn.Linear(input_size, 128),
+            nn.ReLU(),
+            nn.Linear(128, 64),
+            nn.ReLU(),
+            nn.Linear(64, num_classes),
+        )
 
     def forward(self, inputs):
-        # TODO(student): fill in your forward process according to your model
-        raise NotImplementedError("MNIST classifier forward logic not implemented!")
+        return self.network(inputs)
 
 
 def select_training_device(torch_module) -> str:
-    # TODO(student): Pick the best accelerator available on the student's PC.
-    # if torch reports CUDA is available:
-    #     return "cuda" for NVIDIA GPU training
-    # else if torch reports MPS is available:
-    #     return "mps" for Apple Silicon GPU training
-    # otherwise:
-    #     return "cpu" so training still works without an accelerator
-    raise NotImplementedError("select_training_device is not implemented")
+    if hasattr(torch_module, "cuda") and torch_module.cuda.is_available():
+        return "cuda"
+    if hasattr(torch_module, "backends") and hasattr(torch_module.backends, "mps") and torch_module.backends.mps.is_available():
+        return "mps"
+    return "cpu"
 
 
 def train_mnist_classifier(dataset_dir: Path, output_path: Path) -> Path:
-    
     from torch.utils.data import DataLoader, random_split
     import torchvision
-    # TODO(student): Train the MNIST digit classifier used by model.py.
-    # device = select_training_device(torch)
-    # move the model and each batch to device
-    # read training images and labels from dataset_dir
-    # split examples into training and validation sets
-    # preprocess every image the same way model.preprocess_mnist_crop does
-    # model = MNISTClassifier()
-    # choose loss function, optimizer, batch size, and number of epochs
-    # train until validation accuracy is stable
-    # save the trained model weights or serialized estimator to output_path
-    # return output_path
-    raise NotImplementedError("MNIST training is not implemented")
+    from torchvision import transforms as T
+
+    if not dataset_dir.exists():
+        raise FileNotFoundError(f"MNIST dataset directory does not exist: {dataset_dir}")
+
+    dataset_root = dataset_dir
+    if dataset_dir.name == "MNIST":
+        dataset_root = dataset_dir.parent
+
+    device_name = select_training_device(torch)
+    device = torch.device(device_name)
+
+    transform = T.Compose([T.ToTensor()])
+    train_dataset = torchvision.datasets.MNIST(root=dataset_root, train=True, download=False, transform=transform)
+    train_count = int(len(train_dataset) * 0.9)
+    val_count = len(train_dataset) - train_count
+    train_subset, _ = random_split(train_dataset, [train_count, val_count], generator=torch.Generator().manual_seed(42))
+
+    train_loader = DataLoader(train_subset, batch_size=128, shuffle=True, num_workers=0)
+
+    model = MNISTClassifier().to(device)
+    criterion = nn.CrossEntropyLoss()
+    optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    epochs = 5
+    for epoch in range(epochs):
+        model.train()
+        for images, labels in train_loader:
+            images = images.to(device)
+            labels = labels.to(device)
+            logits = model(images)
+            loss = criterion(logits, labels)
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+
+    torch.save(model.state_dict(), output_path)
+    return output_path
 
 
 def parse_args() -> argparse.Namespace:
