@@ -45,3 +45,8 @@ missing-dataset/
 # Local planning notes
 scheme.md
 .vscode/
+
+simulator/
+simulator_client/
+
+*
